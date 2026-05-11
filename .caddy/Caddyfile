@@ -1,0 +1,4 @@
+ragbase.com {
+    reverse_proxy localhost:3000
+    tls internal
+}

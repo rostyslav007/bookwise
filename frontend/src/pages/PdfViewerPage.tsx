@@ -1,8 +1,9 @@
-import { useCallback, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { useParams, useSearchParams, Link } from "react-router-dom";
 import { Document, Page, pdfjs } from "react-pdf";
 import "react-pdf/dist/Page/AnnotationLayer.css";
 import "react-pdf/dist/Page/TextLayer.css";
+import "./PdfViewerPage.css";
 import {
   ArrowLeft,
   ZoomIn,
@@ -33,31 +34,34 @@ export default function PdfViewerPage() {
 
   const pdfUrl = `/api/v1/books/${bookId}/pdf`;
 
+  const highlightWords = useMemo(() => {
+    if (!highlightText) return [];
+    const stopWords = new Set([
+      "the", "a", "an", "is", "are", "was", "were", "be", "been", "being",
+      "have", "has", "had", "do", "does", "did", "will", "would", "could",
+      "should", "may", "might", "shall", "can", "to", "of", "in", "for",
+      "on", "with", "at", "by", "from", "as", "into", "through", "during",
+      "before", "after", "and", "but", "or", "nor", "not", "so", "yet",
+      "both", "either", "neither", "each", "every", "all", "any", "few",
+      "more", "most", "other", "some", "such", "no", "only", "own", "same",
+      "than", "too", "very", "just", "because", "if", "when", "that", "this",
+      "it", "its", "then", "also", "about", "up", "out", "how", "what",
+    ]);
+    return highlightText
+      .split(/\s+/)
+      .filter((w) => w.length > 2 && !stopWords.has(w.toLowerCase()))
+      .map((w) => w.toLowerCase());
+  }, [highlightText]);
+
   const customTextRenderer = useCallback(
     (textItem: { str: string }) => {
-      if (!highlightText) return escapeHtml(textItem.str);
+      if (highlightWords.length === 0) return escapeHtml(textItem.str);
 
-      const src = textItem.str;
-      const query = highlightText.toLowerCase();
-      const parts: string[] = [];
-      let remaining = src;
-
-      while (remaining.length > 0) {
-        const idx = remaining.toLowerCase().indexOf(query);
-        if (idx === -1) {
-          parts.push(escapeHtml(remaining));
-          break;
-        }
-        if (idx > 0) parts.push(escapeHtml(remaining.slice(0, idx)));
-        parts.push(
-          `<mark class="bg-yellow-300/70">${escapeHtml(remaining.slice(idx, idx + highlightText.length))}</mark>`,
-        );
-        remaining = remaining.slice(idx + highlightText.length);
-      }
-
-      return parts.join("");
+      const hasMatch = highlightWords.some((w) => textItem.str.toLowerCase().includes(w));
+      if (!hasMatch) return escapeHtml(textItem.str);
+      return `<mark style="background:rgba(250,204,21,0.4);mix-blend-mode:multiply;border-radius:2px">${escapeHtml(textItem.str)}</mark>`;
     },
-    [highlightText],
+    [highlightWords],
   );
 
   function onDocumentLoadSuccess({ numPages }: { numPages: number }) {
@@ -75,12 +79,6 @@ export default function PdfViewerPage() {
           <ArrowLeft className="size-4" />
           Back to book
         </Link>
-
-        {highlightText && (
-          <span className="rounded bg-yellow-200 px-2 py-0.5 text-xs text-yellow-900">
-            Highlighting: &quot;{highlightText}&quot;
-          </span>
-        )}
 
         <div className="flex items-center gap-2">
           <Button

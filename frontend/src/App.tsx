@@ -4,6 +4,7 @@ import { BrowserRouter, Route, Routes } from 'react-router-dom'
 import { LibraryPage } from '@/pages/LibraryPage'
 import { BookDetailPage } from '@/pages/BookDetailPage'
 import { SearchPage } from '@/pages/SearchPage'
+import { Layout } from '@/components/layout/Layout'
 
 const PdfViewerPage = lazy(() => import('@/pages/PdfViewerPage'))
 const EpubViewerPage = lazy(() => import('@/pages/EpubViewerPage'))
@@ -15,9 +16,9 @@ function App() {
     <QueryClientProvider client={queryClient}>
       <BrowserRouter>
         <Routes>
-          <Route path="/" element={<LibraryPage />} />
-          <Route path="/search" element={<SearchPage />} />
-          <Route path="/books/:bookId" element={<BookDetailPage />} />
+          <Route path="/" element={<Layout><LibraryPage /></Layout>} />
+          <Route path="/search" element={<Layout><SearchPage /></Layout>} />
+          <Route path="/books/:bookId" element={<Layout><BookDetailPage /></Layout>} />
           <Route
             path="/books/:bookId/view"
             element={

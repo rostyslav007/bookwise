@@ -19,6 +19,7 @@ import {
 import { ArrowLeft, Check, Eye, Pencil, RefreshCw, Trash, X } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { ChatPanel } from "@/components/chat/ChatPanel";
+import { useGroups } from "@/api/groups";
 
 const STATUS_VARIANT: Record<string, string> = {
   processing:
@@ -34,6 +35,7 @@ export function BookDetailPage() {
   const chapters = useChapters(bookId!);
   const reindex = useReindexBook();
   const updateBook = useUpdateBook();
+  const { data: groups = [] } = useGroups();
   const deleteBook = useDeleteBook();
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [isEditingTitle, setIsEditingTitle] = useState(false);
@@ -62,6 +64,7 @@ export function BookDetailPage() {
   }
 
   const { data: bookData } = book;
+  const groupName = groups.find((g) => g.id === bookData.group_id)?.name;
 
   return (
     <div className="mx-auto max-w-4xl p-6">
@@ -70,7 +73,7 @@ export function BookDetailPage() {
         className="mb-4 inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
       >
         <ArrowLeft className="size-4" />
-        Back to library
+        {groupName ? `Back to ${groupName} group` : "Back to library"}
       </Link>
 
       {/* Book metadata card */}

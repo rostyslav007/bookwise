@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { Link } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
+import ReactMarkdown from "react-markdown";
 import {
   BookOpen,
   ChevronDown,
@@ -43,40 +44,8 @@ function extractPath(url: string): string {
   }
 }
 
-function parseBookReferences(text: string): React.ReactNode[] {
-  const parts: React.ReactNode[] = [];
-  const regex = /\[([^\]]+)\]\((https?:\/\/[^)]+|\/[^)]+)\)/g;
-  let lastIndex = 0;
-  let match: RegExpExecArray | null;
-
-  while ((match = regex.exec(text)) !== null) {
-    if (match.index > lastIndex) {
-      parts.push(text.slice(lastIndex, match.index));
-    }
-    const label = match[1];
-    const url = match[2];
-    const path = extractPath(url);
-
-    parts.push(
-      <Link
-        key={match.index}
-        to={path}
-        target="_blank"
-        rel="noopener noreferrer"
-        className="mx-0.5 inline-flex items-center gap-1 rounded-md bg-primary/10 px-1.5 py-0.5 text-xs font-medium text-primary hover:bg-primary/20"
-      >
-        <BookOpen className="size-3" />
-        {label}
-      </Link>,
-    );
-    lastIndex = regex.lastIndex;
-  }
-
-  if (lastIndex < text.length) {
-    parts.push(text.slice(lastIndex));
-  }
-
-  return parts.length > 0 ? parts : [text];
+function isBookReferenceLink(href: string): boolean {
+  return href.includes("/books/") && (href.includes("/view") || href.includes("/epub"));
 }
 
 function MessageBubble({ message }: { message: LocalMessage }) {
@@ -85,13 +54,44 @@ function MessageBubble({ message }: { message: LocalMessage }) {
   return (
     <div className={`flex ${isUser ? "justify-end" : "justify-start"}`}>
       <div
-        className={`max-w-[80%] whitespace-pre-wrap rounded-lg px-3 py-2 text-sm ${
+        className={`max-w-[80%] rounded-lg px-3 py-2 text-sm ${
           isUser
-            ? "bg-primary text-primary-foreground"
-            : "bg-muted text-foreground"
+            ? "bg-primary text-primary-foreground whitespace-pre-wrap"
+            : "bg-muted text-foreground prose prose-sm prose-neutral max-w-none [&>*:first-child]:mt-0 [&>*:last-child]:mb-0"
         }`}
       >
-        {isUser ? message.content : parseBookReferences(message.content)}
+        {isUser ? (
+          message.content
+        ) : (
+          <ReactMarkdown
+            components={{
+              a: ({ href, children }) => {
+                const url = href ?? "";
+                const path = extractPath(url);
+                if (isBookReferenceLink(url) || isBookReferenceLink(path)) {
+                  return (
+                    <Link
+                      to={path}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="mx-0.5 inline-flex items-center gap-1 rounded-md bg-primary/10 px-1.5 py-0.5 text-xs font-medium text-primary hover:bg-primary/20 no-underline"
+                    >
+                      <BookOpen className="size-3" />
+                      {children}
+                    </Link>
+                  );
+                }
+                return (
+                  <a href={url} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">
+                    {children}
+                  </a>
+                );
+              },
+            }}
+          >
+            {message.content}
+          </ReactMarkdown>
+        )}
       </div>
     </div>
   );
@@ -196,12 +196,37 @@ function SessionListItem({
 
 export function ChatPanel({ scope, scopeLabel, groupId, bookId }: ChatPanelProps) {
   const [isExpanded, setIsExpanded] = useState(false);
+  const [panelHeight, setPanelHeight] = useState(400);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [messages, setMessages] = useState<LocalMessage[]>([]);
   const [isStreaming, setIsStreaming] = useState(false);
   const [input, setInput] = useState("");
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
+  const isDraggingRef = useRef(false);
+  const startYRef = useRef(0);
+  const startHeightRef = useRef(0);
+
+  const handleResizePointerDown = useCallback((e: ReactPointerEvent) => {
+    e.preventDefault();
+    isDraggingRef.current = true;
+    startYRef.current = e.clientY;
+    startHeightRef.current = panelHeight;
+    (e.target as HTMLElement).setPointerCapture(e.pointerId);
+  }, [panelHeight]);
+
+  const handleResizePointerMove = useCallback((e: ReactPointerEvent) => {
+    if (!isDraggingRef.current) return;
+    const delta = startYRef.current - e.clientY;
+    const headerHeight = 56;
+    const chatBarHeight = 40;
+    const maxHeight = window.innerHeight - headerHeight - chatBarHeight;
+    setPanelHeight(Math.min(maxHeight, Math.max(200, startHeightRef.current + delta)));
+  }, []);
+
+  const handleResizePointerUp = useCallback(() => {
+    isDraggingRef.current = false;
+  }, []);
   const queryClient = useQueryClient();
 
   const { data: sessions = [] } = useChatSessions(scope, groupId, bookId);
@@ -380,7 +405,20 @@ export function ChatPanel({ scope, scopeLabel, groupId, bookId }: ChatPanelProps
 
       {/* Expanded panel */}
       {isExpanded && (
-        <div className="flex h-[400px]">
+        <>
+          {/* Drag handle */}
+          <div
+            className="flex h-1.5 cursor-row-resize items-center justify-center hover:bg-accent"
+            onPointerDown={handleResizePointerDown}
+            onPointerMove={handleResizePointerMove}
+            onPointerUp={handleResizePointerUp}
+          >
+            <div className="h-0.5 w-8 rounded-full bg-muted-foreground/30" />
+          </div>
+        </>
+      )}
+      {isExpanded && (
+        <div className="flex" style={{ height: panelHeight }}>
           {/* Session sidebar */}
           <div className="flex w-48 shrink-0 flex-col border-r bg-muted/30">
             <div className="flex items-center justify-between border-b px-2 py-1.5">

@@ -1,6 +1,5 @@
 import { useState } from "react";
-import { Link } from "react-router-dom";
-import { PlusIcon, MoreHorizontalIcon, PencilIcon, TrashIcon, SearchIcon } from "lucide-react";
+import { PlusIcon, MoreHorizontalIcon, PencilIcon, TrashIcon } from "lucide-react";
 import {
   useGroups,
   useCreateGroup,
@@ -67,16 +66,6 @@ export function GroupSidebar({ selectedGroupId, onSelectGroup }: GroupSidebarPro
 
   return (
     <aside className="flex h-full w-64 flex-col border-r bg-muted/30">
-      <div className="border-b px-4 py-2">
-        <Link
-          to="/search"
-          className="flex items-center gap-2 rounded-md px-2 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
-        >
-          <SearchIcon className="h-4 w-4" />
-          Search
-        </Link>
-      </div>
-
       <div className="flex items-center justify-between border-b px-4 py-3">
         <h2 className="text-sm font-semibold">Groups</h2>
         <Button

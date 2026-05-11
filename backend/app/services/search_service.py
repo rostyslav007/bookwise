@@ -188,3 +188,69 @@ class SearchService:
             source="library",
             message=f"Found {len(hits)} result(s) in your book library.",
         )
+
+    async def explain_from_book(
+        self,
+        book_title: str,
+        query: str | None = None,
+        page_number: int | None = None,
+        page_range: int = 5,
+        limit: int = 10,
+    ) -> ExplainResult:
+        """Fuzzy match a book and retrieve chunks by page range, semantic search, or both."""
+        if not query and page_number is None:
+            return ExplainResult(
+                status="error",
+                message="At least one of 'query' or 'page_number' must be provided.",
+            )
+
+        matches = await self.fuzzy_match_book(book_title)
+
+        if not matches:
+            return ExplainResult(
+                status="not_found",
+                message=f"No books matching '{book_title}' found in your library.",
+            )
+
+        if len(matches) > 1:
+            return ExplainResult(
+                status="ambiguous",
+                message=f"Multiple books matched '{book_title}'. Specify which one.",
+                matches=matches,
+            )
+
+        book = matches[0]
+        book_id = UUID(book.book_id)
+        all_hits: list[SearchHit] = []
+        seen_snippets: set[str] = set()
+
+        if page_number is not None:
+            page_hits = await self.search_by_page_range(
+                book_id=book_id,
+                page_start=max(1, page_number - page_range),
+                page_end=page_number + page_range,
+                limit=limit,
+            )
+            for hit in page_hits:
+                seen_snippets.add(hit.snippet)
+                all_hits.append(hit)
+
+        if query:
+            remaining = limit - len(all_hits)
+            if remaining > 0:
+                semantic_results = await self.search(
+                    query, limit=remaining, book_id=book_id
+                )
+                for hit in semantic_results.results:
+                    if hit.snippet not in seen_snippets:
+                        hit.source = "semantic"
+                        seen_snippets.add(hit.snippet)
+                        all_hits.append(hit)
+
+        return ExplainResult(
+            status="ok",
+            message=f"Found {len(all_hits)} chunk(s) from '{book.title}'.",
+            book_title=book.title,
+            book_author=book.author,
+            results=all_hits[:limit],
+        )

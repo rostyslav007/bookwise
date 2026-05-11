@@ -1,7 +1,20 @@
-import { useId, useRef, useState, type DragEvent, type ChangeEvent } from "react";
+import { useEffect, useId, useRef, useState, type DragEvent, type ChangeEvent } from "react";
 import { Upload } from "lucide-react";
 import { useUploadBook } from "@/api/books";
+import { ApiError } from "@/api/client";
 import { Button } from "@/components/ui/button";
+
+function extractDetail(body: unknown): string | null {
+  if (typeof body === "string") {
+    try {
+      const parsed = JSON.parse(body);
+      if (typeof parsed.detail === "string") return parsed.detail;
+    } catch {
+      return body;
+    }
+  }
+  return null;
+}
 
 interface BookUploadZoneProps {
   groupId: string;
@@ -13,6 +26,10 @@ export function BookUploadZone({ groupId }: BookUploadZoneProps) {
   const uploadMutation = useUploadBook();
   const inputId = useId();
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    setError(null);
+  }, [groupId]);
 
   function validateAndUpload(file: File) {
     setError(null);
@@ -26,7 +43,16 @@ export function BookUploadZone({ groupId }: BookUploadZoneProps) {
 
     uploadMutation.mutate(
       { file, groupId },
-      { onError: () => setError("Upload failed. Please try again.") },
+      {
+        onError: (err) => {
+          if (err instanceof ApiError && err.status === 409) {
+            const detail = extractDetail(err.body);
+            setError(detail || "This file already exists in your library.");
+          } else {
+            setError("Upload failed. Please try again.");
+          }
+        },
+      },
     );
   }
 

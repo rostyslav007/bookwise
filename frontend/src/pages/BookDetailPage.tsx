@@ -18,6 +18,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { ArrowLeft, Check, Eye, Pencil, RefreshCw, Trash, X } from "lucide-react";
 import { Input } from "@/components/ui/input";
+import { ChatPanel } from "@/components/chat/ChatPanel";
 
 const STATUS_VARIANT: Record<string, string> = {
   processing:
@@ -248,6 +249,8 @@ export function BookDetailPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      <ChatPanel scope="book" scopeLabel={bookData.title} bookId={bookId} />
     </div>
   );
 }

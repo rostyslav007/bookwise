@@ -1,7 +1,8 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { GroupSidebar } from "@/components/groups/GroupSidebar";
 import { BookUploadZone } from "@/components/books/BookUploadZone";
 import { BookGrid } from "@/components/books/BookGrid";
+import { ChatPanel } from "@/components/chat/ChatPanel";
 import { useGroups } from "@/api/groups";
 import {
   BookOpen,
@@ -51,6 +52,11 @@ export function LibraryPage() {
   const [selectedGroupId, setSelectedGroupId] = useState<string | null>(null);
   const groups = useGroups();
 
+  const selectedGroupName = useMemo(() => {
+    if (!selectedGroupId || !groups.data) return null;
+    return groups.data.find((g) => g.id === selectedGroupId)?.name ?? null;
+  }, [selectedGroupId, groups.data]);
+
   return (
     <div className="flex h-screen bg-background text-foreground">
       <GroupSidebar
@@ -96,6 +102,16 @@ export function LibraryPage() {
             )}
           </div>
         </main>
+      )}
+
+      {selectedGroupId && selectedGroupName ? (
+        <ChatPanel
+          scope="group"
+          scopeLabel={selectedGroupName}
+          groupId={selectedGroupId}
+        />
+      ) : (
+        <ChatPanel scope="library" scopeLabel="All Books" />
       )}
     </div>
   );

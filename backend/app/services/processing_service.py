@@ -97,9 +97,9 @@ class ProcessingService:
         self._emit(book.id, "Extracting metadata...")
         metadata = parser.extract_metadata(book.file_path)
         if metadata.get("title"):
-            book.title = metadata["title"]
+            book.title = metadata["title"].replace("\x00", "").strip()
         if metadata.get("author"):
-            book.author = metadata["author"]
+            book.author = metadata["author"].replace("\x00", "").strip()
 
         self._emit(book.id, "Extracting chapters...")
         chapters = parser.extract_toc_and_texts(book.file_path)
@@ -232,9 +232,9 @@ class ProcessingService:
         metadata = doc.metadata
         if metadata:
             if metadata.get("title"):
-                book.title = metadata["title"]
+                book.title = metadata["title"].replace("\x00", "").strip()
             if metadata.get("author"):
-                book.author = metadata["author"]
+                book.author = metadata["author"].replace("\x00", "").strip()
         book.page_count = len(doc)
 
     def _extract_page_samples(self, doc: fitz.Document) -> list[dict[str, int | str]]:

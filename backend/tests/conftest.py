@@ -15,6 +15,7 @@ from app.main import app
 from app.models.book import Book, BookStatus
 from app.models.chapter import Chapter  # noqa: F401
 from app.models.chunk import ChunkEmbedding  # noqa: F401
+from app.models.chat import ChatMessage, ChatSession  # noqa: F401
 from app.models.group import Group  # noqa: F401
 
 TEST_DB_URL = os.getenv(

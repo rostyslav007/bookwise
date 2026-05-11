@@ -1,7 +1,7 @@
 from uuid import UUID
 
 from fastapi import HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -90,7 +90,6 @@ class ChatSessionService:
         # Update session's updated_at
         chat_session = await self._session.get(ChatSession, session_id)
         if chat_session:
-            from sqlalchemy import func
             chat_session.updated_at = func.now()
         await self._session.commit()
         await self._session.refresh(message)

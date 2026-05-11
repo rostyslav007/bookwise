@@ -145,13 +145,17 @@ async def chat_stream(
             ):
                 assistant_content += chunk
                 yield f"data: {json.dumps(chunk)}\n\n"
+        except Exception:
+            logger.exception("Chat stream error for session %s", session_id)
         finally:
-            # Persist assistant response
             if assistant_content:
-                await session_service.add_message(
-                    session_id, "assistant", assistant_content
-                )
-        yield "data: [DONE]\n\n"
+                try:
+                    await session_service.add_message(
+                        session_id, "assistant", assistant_content
+                    )
+                except Exception:
+                    logger.exception("Failed to persist assistant message for session %s", session_id)
+            yield "data: [DONE]\n\n"
 
     return StreamingResponse(
         event_stream(),

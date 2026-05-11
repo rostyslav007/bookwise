@@ -9,7 +9,10 @@ class EmbeddingService:
 
     def _get_model(self) -> SentenceTransformer:
         if self._model is None:
-            self._model = SentenceTransformer(settings.embedding_model)
+            kwargs: dict[str, str] = {}
+            if settings.embedding_cache_path:
+                kwargs["cache_folder"] = settings.embedding_cache_path
+            self._model = SentenceTransformer(settings.embedding_model, **kwargs)
         return self._model
 
     def encode(self, texts: list[str]) -> list[list[float]]:

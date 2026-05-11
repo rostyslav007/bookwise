@@ -87,9 +87,9 @@ class ChatService:
                 "⚠️ **Invalid API key.** "
                 "Set a valid `ANTHROPIC_API_KEY` in your `.env` file."
             )
-        except Exception as e:
+        except Exception:
             logger.exception("Chat stream error")
-            yield f"⚠️ **Error:** {e}"
+            yield "⚠️ **Error:** Something went wrong. Please try again."
 
     @staticmethod
     def _format_context(results: SearchResult) -> str:

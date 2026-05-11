@@ -8,6 +8,7 @@ from app.config import settings
 from app.database import Base
 from app.models.book import Book  # noqa: F401
 from app.models.chapter import Chapter  # noqa: F401
+from app.models.chat import ChatMessage, ChatSession  # noqa: F401
 from app.models.chunk import ChunkEmbedding  # noqa: F401
 from app.models.group import Group  # noqa: F401
 

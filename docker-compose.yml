@@ -1,3 +1,5 @@
+name: bookwise
+
 services:
   db:
     restart: always

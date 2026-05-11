@@ -13,7 +13,7 @@ export function Header() {
       <div className="container mx-auto flex h-14 items-center justify-between px-4">
         <Link to="/" className="flex items-center gap-2 font-semibold text-lg hover:opacity-80 transition-opacity">
           <BookOpenIcon className="h-5 w-5 text-primary" />
-          <span>RagBase</span>
+          <span>Bookwise</span>
         </Link>
 
         <nav className="flex items-center gap-1">

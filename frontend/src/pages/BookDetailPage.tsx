@@ -16,7 +16,7 @@ import {
   AlertDialogAction,
   AlertDialogCancel,
 } from "@/components/ui/alert-dialog";
-import { ArrowLeft, Check, Eye, Pencil, RefreshCw, Trash, X } from "lucide-react";
+import { ArrowLeft, Check, Download, Eye, Pencil, RefreshCw, Trash, X } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { ChatPanel } from "@/components/chat/ChatPanel";
 import { useGroups } from "@/api/groups";
@@ -165,6 +165,19 @@ export function BookDetailPage() {
               >
                 <Eye className="size-3.5" />
                 {bookData.format === "epub" ? "View EPUB" : "View PDF"}
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  const a = document.createElement("a");
+                  a.href = `/api/v1/books/${bookId}/${bookData.format === "epub" ? "file" : "pdf"}`;
+                  a.download = `${bookData.title}.${bookData.format}`;
+                  a.click();
+                }}
+              >
+                <Download className="size-3.5" />
+                Download
               </Button>
               <Button
                 variant="outline"

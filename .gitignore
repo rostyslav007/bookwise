@@ -10,3 +10,4 @@ data/
 .claude/attn_state.json
 .playwright-mcp/
 test-results/
+sample/

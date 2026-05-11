@@ -40,10 +40,94 @@ class SearchResult(BaseModel):
     message: str
 
 
+class BookMatch(BaseModel):
+    title: str
+    author: str | None
+    book_id: str
+
+
+class ExplainResult(BaseModel):
+    status: str  # "ok", "ambiguous", "not_found"
+    message: str
+    book_title: str | None = None
+    book_author: str | None = None
+    matches: list[BookMatch] | None = None
+    results: list[SearchHit] | None = None
+
+
 class SearchService:
     def __init__(self, session: AsyncSession, embedding_service: EmbeddingService) -> None:
         self._session = session
         self._embedding_service = embedding_service
+
+    async def fuzzy_match_book(self, book_title: str) -> list[BookMatch]:
+        """Find books matching a (potentially vague) title using case-insensitive containment."""
+        sql = text("""
+            SELECT id, title, author FROM books
+            WHERE LOWER(title) LIKE '%' || LOWER(:query) || '%'
+            ORDER BY title
+        """)
+        result = await self._session.execute(sql, {"query": book_title})
+        return [
+            BookMatch(title=row.title, author=row.author, book_id=str(row.id))
+            for row in result.fetchall()
+        ]
+
+    async def search_by_page_range(
+        self,
+        book_id: UUID,
+        page_start: int,
+        page_end: int,
+        limit: int = 10,
+    ) -> list[SearchHit]:
+        """Retrieve chunks within a page range for a specific book."""
+        sql = text("""
+            SELECT
+                ce.content, ce.page_number, ce.chapter_id, ce.book_id,
+                c.title AS chapter_title,
+                b.title AS book_title, b.author, b.format
+            FROM chunk_embeddings ce
+            JOIN chapters c ON ce.chapter_id = c.id
+            JOIN books b ON ce.book_id = b.id
+            WHERE ce.book_id = :book_id
+              AND ce.page_number BETWEEN :page_start AND :page_end
+            ORDER BY ce.page_number
+            LIMIT :limit
+        """)
+        result = await self._session.execute(sql, {
+            "book_id": str(book_id),
+            "page_start": page_start,
+            "page_end": page_end,
+            "limit": limit,
+        })
+        return [self._row_to_hit(row, source="page_context") for row in result.fetchall()]
+
+    def _row_to_hit(self, row, source: str = "semantic", relevance_score: float = 0.0) -> SearchHit:
+        """Convert a DB row to a SearchHit."""
+        if row.format == "epub":
+            chapter_index = row.page_number - 1
+            viewer_url = (
+                f"{settings.frontend_url}/books/{row.book_id}/epub"
+                f"?chapter={chapter_index}"
+            )
+        else:
+            viewer_url = (
+                f"{settings.frontend_url}/books/{row.book_id}/view"
+                f"?page={row.page_number}"
+                f"&highlight={quote_plus(str(row.content)[:80])}"
+            )
+        return SearchHit(
+            book_title=row.book_title,
+            author=row.author,
+            chapter_title=row.chapter_title,
+            chapter_id=str(row.chapter_id),
+            page_number=row.page_number,
+            snippet=row.content[:500],
+            relevance_score=round(relevance_score, 4),
+            viewer_url=viewer_url,
+            format=row.format,
+            source=source,
+        )
 
     async def search(
         self,
@@ -94,34 +178,10 @@ class SearchService:
                 message="No matches found in your book library.",
             )
 
-        hits = []
-        for row in rows:
-            if row.format == "epub":
-                # page_number stores chapter order (1-indexed) for EPUBs
-                chapter_index = row.page_number - 1
-                viewer_url = (
-                    f"{settings.frontend_url}/books/{row.book_id}/epub"
-                    f"?chapter={chapter_index}"
-                )
-            else:
-                viewer_url = (
-                    f"{settings.frontend_url}/books/{row.book_id}/view"
-                    f"?page={row.page_number}"
-                    f"&highlight={quote_plus(str(row.content)[:80])}"
-                )
-            hits.append(
-                SearchHit(
-                    book_title=row.book_title,
-                    author=row.author,
-                    chapter_title=row.chapter_title,
-                    chapter_id=str(row.chapter_id),
-                    page_number=row.page_number,
-                    snippet=row.content[:500],
-                    relevance_score=round(float(row.relevance_score), 4),
-                    viewer_url=viewer_url,
-                    format=row.format,
-                )
-            )
+        hits = [
+            self._row_to_hit(row, source="semantic", relevance_score=float(row.relevance_score))
+            for row in rows
+        ]
 
         return SearchResult(
             results=hits,

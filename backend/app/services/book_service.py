@@ -1,3 +1,4 @@
+import hashlib
 from pathlib import Path
 from uuid import UUID, uuid4
 
@@ -7,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.models.book import Book, BookFormat, BookStatus
+from app.models.group import Group
 
 _ALLOWED_MIMETYPES: dict[str, BookFormat] = {
     "application/pdf": BookFormat.PDF,
@@ -87,6 +89,21 @@ class BookService:
         file_path = storage_dir / f"{book_id}{extension}"
 
         content = await file.read()
+        file_hash = hashlib.sha256(content).hexdigest()
+
+        # Check for duplicate file
+        existing = await self._session.execute(
+            select(Book).where(Book.file_hash == file_hash)
+        )
+        duplicate = existing.scalar_one_or_none()
+        if duplicate:
+            group = await self._session.get(Group, duplicate.group_id)
+            group_name = group.name if group else "Unknown"
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"This file was already stored in group \"{group_name}\" as \"{duplicate.title}\".",
+            )
+
         file_path.write_bytes(content)
 
         title = Path(file.filename or "untitled").stem
@@ -96,6 +113,7 @@ class BookService:
             group_id=group_id,
             title=title,
             file_path=str(file_path),
+            file_hash=file_hash,
             format=book_format.value,
             status=BookStatus.PROCESSING.value,
         )

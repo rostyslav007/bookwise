@@ -1,6 +1,7 @@
 """Service for semantic search across book chunks using pgvector."""
 
 from urllib.parse import quote_plus
+from uuid import UUID
 
 from pydantic import BaseModel
 from sqlalchemy import text
@@ -44,11 +45,27 @@ class SearchService:
         self._session = session
         self._embedding_service = embedding_service
 
-    async def search(self, query: str, limit: int = 5) -> SearchResult:
+    async def search(
+        self,
+        query: str,
+        limit: int = 5,
+        group_id: UUID | None = None,
+        book_id: UUID | None = None,
+    ) -> SearchResult:
         """Search book chunks by semantic similarity using pgvector cosine distance."""
         query_embedding = self._embedding_service.encode([query])[0]
 
-        sql = text("""
+        where_clauses = ""
+        params: dict[str, str | int] = {"embedding": str(query_embedding), "limit": limit}
+
+        if book_id:
+            where_clauses += " AND ce.book_id = :book_id"
+            params["book_id"] = str(book_id)
+        elif group_id:
+            where_clauses += " AND b.group_id = :group_id"
+            params["group_id"] = str(group_id)
+
+        sql = text(f"""
             SELECT
                 ce.content,
                 ce.page_number,
@@ -62,14 +79,12 @@ class SearchService:
             FROM chunk_embeddings ce
             JOIN chapters c ON ce.chapter_id = c.id
             JOIN books b ON ce.book_id = b.id
+            WHERE 1=1 {where_clauses}
             ORDER BY ce.embedding <=> CAST(:embedding AS vector)
             LIMIT :limit
         """)
 
-        result = await self._session.execute(
-            sql,
-            {"embedding": str(query_embedding), "limit": limit},
-        )
+        result = await self._session.execute(sql, params)
         rows = result.fetchall()
 
         if not rows:

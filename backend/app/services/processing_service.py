@@ -164,7 +164,7 @@ class ProcessingService:
                     ChunkEmbedding(
                         chapter_id=chapter_record.id,
                         book_id=book_id,
-                        content=chunk_text,
+                        content=chunk_text.replace("\x00", ""),
                         page_number=int(ch.get("order", 0)) + 1,
                         embedding=embedding,
                     )
@@ -206,7 +206,7 @@ class ProcessingService:
 
         structure: list[dict[str, object]] = []
         for i, entry in enumerate(toc):
-            title = entry[1] if len(entry) > 1 else f"Chapter {i + 1}"
+            title = str(entry[1]).replace("\x00", "").strip() if len(entry) > 1 else f"Chapter {i + 1}"
             start_page = entry[2] if len(entry) > 2 else 1
             # End page is the start of the next entry minus 1, or total_pages for the last
             next_start = (toc[i + 1][2] - 1) if i + 1 < len(toc) and len(toc[i + 1]) > 2 else total_pages
@@ -257,7 +257,7 @@ class ProcessingService:
             chapter = Chapter(
                 book_id=book_id,
                 parent_id=parent_id,
-                title=str(item.get("title", "Untitled")),
+                title=str(item.get("title", "Untitled")).replace("\x00", "").strip(),
                 level=level,
                 order=order,
                 start_page=int(item.get("start_page", 1)),
@@ -303,7 +303,7 @@ class ProcessingService:
                     ChunkEmbedding(
                         chapter_id=chapter.id,
                         book_id=book_id,
-                        content=chunk_text,
+                        content=chunk_text.replace("\x00", ""),
                         page_number=chapter.start_page,
                         embedding=embedding,
                     )

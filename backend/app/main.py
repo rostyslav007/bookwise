@@ -7,6 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.config import settings
 from app.routers.books import router as books_router
 from app.routers.chapters import router as chapters_router
+from app.routers.chat import router as chat_router
 from app.routers.groups import router as groups_router
 from app.routers.search import router as search_router
 
@@ -31,6 +32,7 @@ app.include_router(groups_router)
 app.include_router(books_router)
 app.include_router(chapters_router)
 app.include_router(search_router)
+app.include_router(chat_router)
 
 
 @app.get("/api/v1/health")

@@ -19,7 +19,10 @@ mcp = FastMCP(
         "Search the user's personal technical book library. "
         "Use search_books to find concepts, patterns, and topics across all books. "
         "Use explain_from_book when the user asks about a concept from a specific book or page. "
-        "Results include book title, chapter, page number, and relevant text snippets. "
+        "Results include book title, chapter, page number, relevant text snippets, and a viewer_url. "
+        "IMPORTANT: When citing results, always use the exact viewer_url from the tool response as the link target. "
+        "Format citations as markdown links: [Book Title — Chapter, p.123](viewer_url). "
+        "Never generate or guess URLs — only use the viewer_url values returned by the tools. "
         "Always search books first before using general knowledge. "
         "If search returns source='not_found', inform the user the answer comes from general knowledge, not their books."
     ),

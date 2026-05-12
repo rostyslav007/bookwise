@@ -32,6 +32,7 @@ _MAX_TEXT_PER_PAGE = 2000
 _CHUNK_SIZE = 2000
 _CHUNK_OVERLAP = 400
 _MAX_CHUNK_SIZE = 4000  # heading-based sections larger than this get sub-split
+_MIN_CHUNK_SIZE = 200   # chunks smaller than this get merged with the next one
 
 
 class ProcessingService:
@@ -127,11 +128,13 @@ class ProcessingService:
         chapters: list[dict[str, str | int]],
         strategy: ChunkingStrategy = ChunkingStrategy.HEADINGS,
     ) -> None:
-        """Chunk and embed EPUB chapter texts."""
-        total = len(chapters)
-        for idx, ch in enumerate(chapters):
-            self._emit(book_id, f"Indexing concepts... ({idx + 1}/{total})")
+        """Chunk and embed EPUB chapter texts in batches."""
+        # Phase 1: Chunk all chapters and collect metadata
+        self._emit(book_id, "Chunking text...")
+        chunk_records: list[tuple[str, UUID, int]] = []  # (text, chapter_id, page_number)
+        all_texts: list[str] = []
 
+        for idx, ch in enumerate(chapters):
             html = str(ch.get("html", ""))
             text = str(ch.get("text", ""))
             if not text.strip():
@@ -157,20 +160,37 @@ class ProcessingService:
             if not chapter_record:
                 continue
 
-            embeddings = await self._embedding_service.encode_async(chunks)
+            page_number = int(ch.get("order", 0)) + 1
+            for chunk_text in chunks:
+                all_texts.append(chunk_text)
+                chunk_records.append((chunk_text, chapter_record.id, page_number))
 
-            for chunk_text, embedding in zip(chunks, embeddings):
-                self._session.add(
-                    ChunkEmbedding(
-                        chapter_id=chapter_record.id,
-                        book_id=book_id,
-                        content=chunk_text.replace("\x00", ""),
-                        page_number=int(ch.get("order", 0)) + 1,
-                        embedding=embedding,
-                    )
+        if not all_texts:
+            return
+
+        # Phase 2: Encode all chunks in batches
+        batch_size = 64
+        all_embeddings: list[list[float]] = []
+        total_chunks = len(all_texts)
+        for i in range(0, total_chunks, batch_size):
+            batch = all_texts[i : i + batch_size]
+            self._emit(book_id, f"Encoding embeddings... ({min(i + batch_size, total_chunks)}/{total_chunks})")
+            embeddings = await self._embedding_service.encode_async(batch)
+            all_embeddings.extend(embeddings)
+
+        # Phase 3: Insert all chunk embeddings
+        self._emit(book_id, "Saving to database...")
+        for (chunk_text, chapter_id, page_number), embedding in zip(chunk_records, all_embeddings):
+            self._session.add(
+                ChunkEmbedding(
+                    chapter_id=chapter_id,
+                    book_id=book_id,
+                    content=chunk_text.replace("\x00", ""),
+                    page_number=page_number,
+                    embedding=embedding,
                 )
-
-            await self._session.flush()
+            )
+        await self._session.flush()
 
     async def _generate_structure(
         self,
@@ -314,9 +334,16 @@ class ProcessingService:
         file_path: str,
         strategy: ChunkingStrategy = ChunkingStrategy.HEADINGS,
     ) -> None:
-        """Extract text from leaf chapters, chunk, and store embeddings."""
+        """Extract text from leaf chapters, chunk, and store embeddings in batches.
+
+        Uses the TOC hierarchy as the primary chunking strategy:
+        - Each leaf chapter becomes one or more chunks
+        - Chapters under _MIN_CHUNK_SIZE are merged with the next sibling
+        - Chapters over _MAX_CHUNK_SIZE are sub-split with overlap
+        - Falls back to heading detection only if there's no TOC (single "Full Book" chapter)
+        """
         result = await self._session.execute(
-            select(Chapter).where(Chapter.book_id == book_id)
+            select(Chapter).where(Chapter.book_id == book_id).order_by(Chapter.order)
         )
         chapters = list(result.scalars().all())
 
@@ -324,32 +351,115 @@ class ProcessingService:
         leaf_chapters = [c for c in chapters if c.id not in parent_ids]
 
         doc = fitz.open(file_path)
-        total = len(leaf_chapters)
 
-        for idx, chapter in enumerate(leaf_chapters):
-            self._emit(book_id, f"Indexing concepts... ({idx + 1}/{total})")
+        # Phase 1: Extract text per leaf chapter, then chunk
+        self._emit(book_id, "Chunking text...")
+        chunk_records: list[tuple[str, UUID, int]] = []  # (text, chapter_id, page_number)
+        all_texts: list[str] = []
 
-            chunks = self._get_pdf_chunks(doc, chapter, strategy)
+        # If there's only one chapter (no real TOC), fall back to heading detection
+        use_toc_chunking = len(leaf_chapters) > 1
 
-            if not chunks:
-                continue
+        if use_toc_chunking:
+            # TOC-based: each leaf chapter is a semantic unit
+            pending_text = ""
+            pending_chapter: Chapter | None = None
 
-            embeddings = await self._embedding_service.encode_async(chunks)
+            for chapter in leaf_chapters:
+                chapter_text = self._extract_chapter_text(doc, chapter)
+                if not chapter_text.strip():
+                    continue
 
-            for chunk_text, embedding in zip(chunks, embeddings):
-                self._session.add(
-                    ChunkEmbedding(
-                        chapter_id=chapter.id,
-                        book_id=book_id,
-                        content=chunk_text.replace("\x00", ""),
-                        page_number=chapter.start_page,
-                        embedding=embedding,
-                    )
+                # Merge small chapters with pending buffer
+                if pending_text and len(pending_text) < _MIN_CHUNK_SIZE:
+                    pending_text += "\n" + chapter_text
+                    # Keep the original pending_chapter for the chunk record
+                else:
+                    # Flush pending buffer
+                    if pending_text:
+                        self._add_chapter_chunks(
+                            pending_text, pending_chapter, book_id,
+                            all_texts, chunk_records,
+                        )
+                    pending_text = chapter_text
+                    pending_chapter = chapter
+
+            # Flush last pending
+            if pending_text and pending_chapter:
+                self._add_chapter_chunks(
+                    pending_text, pending_chapter, book_id,
+                    all_texts, chunk_records,
                 )
+        else:
+            # No TOC — fall back to heading detection or fixed chunking
+            for chapter in leaf_chapters:
+                chunks = self._get_pdf_chunks(doc, chapter, strategy)
+                if not chunks:
+                    continue
+                for chunk_text in chunks:
+                    all_texts.append(chunk_text)
+                    chunk_records.append((chunk_text, chapter.id, chapter.start_page))
+
+        doc.close()
+
+        if not all_texts:
+            return
+
+        # Phase 2: Encode all chunks in batches
+        batch_size = 64
+        all_embeddings: list[list[float]] = []
+        total_chunks = len(all_texts)
+        for i in range(0, total_chunks, batch_size):
+            batch = all_texts[i : i + batch_size]
+            self._emit(book_id, f"Encoding embeddings... ({min(i + batch_size, total_chunks)}/{total_chunks})")
+            embeddings = await self._embedding_service.encode_async(batch)
+            all_embeddings.extend(embeddings)
+
+        # Phase 3: Insert all chunk embeddings
+        self._emit(book_id, "Saving to database...")
+        for (chunk_text, chapter_id, page_number), embedding in zip(chunk_records, all_embeddings):
+            self._session.add(
+                ChunkEmbedding(
+                    chapter_id=chapter_id,
+                    book_id=book_id,
+                    content=chunk_text.replace("\x00", ""),
+                    page_number=page_number,
+                    embedding=embedding,
+                )
+            )
 
             await self._session.flush()
 
         doc.close()
+
+    @staticmethod
+    def _extract_chapter_text(doc: fitz.Document, chapter: Chapter) -> str:
+        """Extract raw text from a chapter's page range."""
+        parts = []
+        for page_num in range(chapter.start_page - 1, min(chapter.end_page, len(doc))):
+            parts.append(doc[page_num].get_text())
+        return "\n".join(parts)
+
+    @staticmethod
+    def _add_chapter_chunks(
+        text: str,
+        chapter: Chapter,
+        book_id: UUID,
+        all_texts: list[str],
+        chunk_records: list[tuple[str, UUID, int]],
+    ) -> None:
+        """Add chunks for a chapter's text, sub-splitting if too large."""
+        text = text.strip()
+        if not text:
+            return
+        if len(text) <= _MAX_CHUNK_SIZE:
+            all_texts.append(text)
+            chunk_records.append((text, chapter.id, chapter.start_page))
+        else:
+            sub_chunks = ProcessingService._chunk_text(text)
+            for chunk in sub_chunks:
+                all_texts.append(chunk)
+                chunk_records.append((chunk, chapter.id, chapter.start_page))
 
     @staticmethod
     def _get_pdf_chunks(
@@ -451,17 +561,24 @@ class ProcessingService:
             sections.append({"text": "\n".join(current_section_lines)})
 
         # Build chunks: use sections directly, sub-split if too large
-        chunks: list[str] = []
+        raw_chunks: list[str] = []
         for section in sections:
             text = str(section["text"]).strip()
             if not text:
                 continue
             if len(text) <= _MAX_CHUNK_SIZE:
-                chunks.append(text)
+                raw_chunks.append(text)
             else:
-                # Sub-split large sections with overlap
                 sub_chunks = ProcessingService._chunk_text(text)
-                chunks.extend(sub_chunks)
+                raw_chunks.extend(sub_chunks)
+
+        # Merge small chunks with the next one to avoid tiny fragments
+        chunks: list[str] = []
+        for chunk in raw_chunks:
+            if chunks and len(chunks[-1]) < _MIN_CHUNK_SIZE:
+                chunks[-1] = chunks[-1] + "\n" + chunk
+            else:
+                chunks.append(chunk)
 
         return chunks
 

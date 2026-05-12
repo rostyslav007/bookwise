@@ -22,10 +22,11 @@ Bookwise trades NotebookLM's audio overviews and polished UX for **ownership, pr
 
 ## Features
 
-- **Upload PDF/EPUB** -- automatic metadata extraction, TOC parsing, and AI-powered chapter structure generation
+- **Upload PDF/EPUB** -- automatic metadata extraction, hierarchical TOC parsing (PyMuPDF), and AI-powered chapter structure generation
 - **Semantic search** -- vector similarity search (pgvector) across your entire library with ranked results
-- **RAG chat** -- streaming chat with Claude, grounded in your books with clickable citations that open the exact page
-- **Built-in viewers** -- PDF viewer (react-pdf) with page nav, zoom, and highlight; EPUB viewer (epubjs) with chapter TOC
+- **Tool-use chat** -- streaming chat with Claude using `search_books` and `explain_from_book` tools, grounded in your books with clickable citations that open the exact page
+- **Built-in viewers** -- PDF viewer (react-pdf) with page nav, zoom, highlight, and chapter sidebar; EPUB viewer (epubjs) with chapter TOC
+- **Page image extraction** -- PDF pages rendered as images and sent to Claude as native ImageContent blocks for visual context
 - **Book organization** -- group books by topic, search within groups or across the whole library
 - **MCP server** -- expose your library to Claude Code, Cursor, or any MCP-compatible AI assistant
 - **REST API** -- full CRUD for books, chapters, groups, search, and chat
@@ -33,12 +34,12 @@ Bookwise trades NotebookLM's audio overviews and polished UX for **ownership, pr
 ## Architecture
 
 ```
-Upload PDF/EPUB --> Extract metadata + TOC --> AI structure enrichment
---> Save chapters (hierarchical) --> Chunk text (heading-based or fixed)
+Upload PDF/EPUB --> Extract metadata + TOC (PyMuPDF hierarchical TOC) --> AI structure enrichment
+--> Save chapters (hierarchical) --> Chunk text (TOC-based primary, fixed fallback)
 --> Embed with sentence-transformers --> Store in pgvector
 
 Search query --> Embed --> Cosine similarity --> Ranked results with viewer links
-Chat --> RAG retrieval (scoped) --> Claude streaming response with book citations
+Chat --> Claude tool_use (search_books + explain_from_book) --> Streaming response with book citations
 ```
 
 ## Tech Stack
@@ -96,10 +97,11 @@ Bedrock is the primary chat provider. `ANTHROPIC_API_KEY` is only used as a fall
 
 ## MCP Server
 
-Bookwise exposes two tools via MCP for use with Claude Code, Cursor, or other MCP-compatible assistants:
+Bookwise exposes three tools via MCP for use with Claude Code, Cursor, or other MCP-compatible assistants:
 
 - **`search_books(query)`** -- semantic search across your library, returns book title, chapter, page number, and text snippet
 - **`get_chapter_content(chapter_id)`** -- retrieve full chapter text with metadata
+- **`explain_from_book(book_title, query?, page_number?)`** -- retrieve chunks from a specific book with fuzzy title matching, page-based + semantic retrieval, and PDF page images returned as native `ImageContent` blocks for visual context
 
 ### Configure in Claude Code
 
@@ -108,7 +110,7 @@ Add to your `.mcp.json`:
 ```json
 {
   "mcpServers": {
-    "books-navigation": {
+    "bookwise": {
       "type": "stdio",
       "command": "uv",
       "args": ["run", "--directory", "backend", "python", "-m", "app.mcp_server"],

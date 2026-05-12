@@ -33,7 +33,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     yield
 
 
-app = FastAPI(title="BooksNavigationMCP", lifespan=lifespan)
+app = FastAPI(title="Bookwise", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,

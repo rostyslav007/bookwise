@@ -10,8 +10,11 @@ import {
   ZoomOut,
   ChevronLeft,
   ChevronRight,
+  ChevronDown,
+  ChevronRight as ChevronRightIcon,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { useChapters, type Chapter } from "@/api/chapters";
 
 pdfjs.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
 
@@ -20,6 +23,55 @@ function escapeHtml(text: string): string {
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;");
+}
+
+function TocItem({
+  chapter,
+  currentPage,
+  onNavigate,
+}: {
+  chapter: Chapter;
+  currentPage: number;
+  onNavigate: (page: number) => void;
+}) {
+  const [expanded, setExpanded] = useState(true);
+  const hasChildren = chapter.children.length > 0;
+  const isActive = currentPage >= chapter.start_page && currentPage <= chapter.end_page;
+
+  return (
+    <li>
+      <div className="flex items-center gap-0.5">
+        {hasChildren ? (
+          <button
+            className="shrink-0 p-0.5 text-muted-foreground hover:text-foreground"
+            onClick={() => setExpanded(!expanded)}
+          >
+            {expanded ? <ChevronDown className="size-3" /> : <ChevronRightIcon className="size-3" />}
+          </button>
+        ) : (
+          <span className="w-4 shrink-0" />
+        )}
+        <button
+          className={`flex-1 truncate text-left text-sm hover:text-foreground ${
+            isActive ? "font-medium text-foreground" : "text-muted-foreground"
+          }`}
+          style={{ paddingLeft: `${chapter.level * 8}px` }}
+          onClick={() => onNavigate(chapter.start_page)}
+          title={`${chapter.title} (p.${chapter.start_page})`}
+        >
+          {chapter.title}
+        </button>
+        <span className="shrink-0 text-xs text-muted-foreground/60">{chapter.start_page}</span>
+      </div>
+      {hasChildren && expanded && (
+        <ul className="ml-1">
+          {chapter.children.map((child) => (
+            <TocItem key={child.id} chapter={child} currentPage={currentPage} onNavigate={onNavigate} />
+          ))}
+        </ul>
+      )}
+    </li>
+  );
 }
 
 export default function PdfViewerPage() {
@@ -31,6 +83,7 @@ export default function PdfViewerPage() {
   const [numPages, setNumPages] = useState(0);
   const [currentPage, setCurrentPage] = useState(targetPage);
   const [scale, setScale] = useState(1.2);
+  const { data: chapters } = useChapters(bookId!);
 
   const pdfUrl = `/api/v1/books/${bookId}/pdf`;
 
@@ -119,20 +172,40 @@ export default function PdfViewerPage() {
         </div>
       </div>
 
-      <div className="flex flex-1 justify-center overflow-auto bg-gray-100 py-4">
-        <Document
-          file={pdfUrl}
-          onLoadSuccess={onDocumentLoadSuccess}
-          loading={
-            <p className="p-8 text-muted-foreground">Loading PDF...</p>
-          }
-        >
-          <Page
-            pageNumber={currentPage}
-            scale={scale}
-            customTextRenderer={customTextRenderer}
-          />
-        </Document>
+      <div className="flex flex-1 overflow-hidden">
+        {/* TOC sidebar */}
+        {chapters && chapters.length > 0 && (
+          <nav className="w-64 shrink-0 overflow-y-auto border-r bg-gray-50 p-3">
+            <h3 className="mb-2 text-xs font-semibold uppercase text-muted-foreground">Contents</h3>
+            <ul className="space-y-0.5">
+              {chapters.map((ch) => (
+                <TocItem
+                  key={ch.id}
+                  chapter={ch}
+                  currentPage={currentPage}
+                  onNavigate={setCurrentPage}
+                />
+              ))}
+            </ul>
+          </nav>
+        )}
+
+        {/* PDF content */}
+        <div className="flex flex-1 justify-center overflow-auto bg-gray-100 py-4">
+          <Document
+            file={pdfUrl}
+            onLoadSuccess={onDocumentLoadSuccess}
+            loading={
+              <p className="p-8 text-muted-foreground">Loading PDF...</p>
+            }
+          >
+            <Page
+              pageNumber={currentPage}
+              scale={scale}
+              customTextRenderer={customTextRenderer}
+            />
+          </Document>
+        </div>
       </div>
     </div>
   );

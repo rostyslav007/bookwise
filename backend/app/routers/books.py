@@ -212,8 +212,12 @@ async def _run_reindex(book_id: UUID, strategy: str = "headings") -> None:
     chunking = ChunkingStrategy(strategy) if isinstance(strategy, str) else strategy
     try:
         async with background_session_factory() as session:
+            # Delete existing chunks and chapters
             await session.execute(
                 delete(ChunkEmbedding).where(ChunkEmbedding.book_id == book_id)
+            )
+            await session.execute(
+                delete(Chapter).where(Chapter.book_id == book_id)
             )
             await session.commit()
 
@@ -231,9 +235,26 @@ async def _run_reindex(book_id: UUID, strategy: str = "headings") -> None:
             if book.format == "epub":
                 from app.services.epub_parser_service import EpubParserService
                 parser = EpubParserService()
-                chapters = parser.extract_toc_and_texts(book.file_path)
-                await processing_service._embed_epub_chapters(book_id, chapters, chunking)
+                epub_chapters = parser.extract_toc_and_texts(book.file_path)
+                # Rebuild chapter structure from EPUB TOC
+                structure = [
+                    {"title": ch["title"], "start_page": int(ch["order"]) + 1,
+                     "end_page": int(ch["order"]) + 1, "children": []}
+                    for ch in epub_chapters
+                ]
+                await processing_service._save_chapters(book_id, structure)
+                await session.flush()
+                await processing_service._embed_epub_chapters(book_id, epub_chapters, chunking)
             else:
+                import fitz
+                doc = fitz.open(book.file_path)
+                toc = doc.get_toc()
+                total_pages = len(doc)
+                doc.close()
+                # Rebuild hierarchical chapter structure from PyMuPDF TOC
+                structure = ProcessingService._toc_to_structure(toc, total_pages)
+                await processing_service._save_chapters(book_id, structure)
+                await session.flush()
                 await processing_service._embed_chapters(book_id, book.file_path, chunking)
 
             book.status = BookStatus.READY.value

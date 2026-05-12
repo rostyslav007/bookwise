@@ -19,21 +19,10 @@ from app.schemas.chat import (
 )
 from app.services.chat_service import ChatService
 from app.services.chat_session_service import ChatSessionService
-from app.services.embedding_service import EmbeddingService
-from app.services.search_service import SearchService
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1/chat", tags=["chat"])
-
-_embedding_service: EmbeddingService | None = None
-
-
-def _get_embedding_service() -> EmbeddingService:
-    global _embedding_service
-    if _embedding_service is None:
-        _embedding_service = EmbeddingService()
-    return _embedding_service
 
 
 # --- Session CRUD ---
@@ -131,8 +120,7 @@ async def chat_stream(
     }
     scope_label = scope_labels.get(chat_session.scope, "All books")
 
-    search_service = SearchService(session, _get_embedding_service())
-    chat_service = ChatService(search_service)
+    chat_service = ChatService()
 
     async def event_stream() -> AsyncGenerator[str, None]:
         assistant_content = ""

@@ -1,10 +1,11 @@
-"""BooksNavigationMCP - MCP server for searching technical books."""
+"""Bookwise - MCP server for searching technical books."""
 
 from pathlib import Path
 from uuid import UUID
 
 import fitz
 from mcp.server.fastmcp import FastMCP
+from mcp.types import ImageContent, TextContent
 
 from app.database import async_session_factory
 from app.models.book import Book, BookFormat
@@ -120,7 +121,7 @@ async def explain_from_book(
     page_number: int | None = None,
     page_range: int = 5,
     limit: int = 10,
-) -> ExplainResult:
+) -> list[TextContent | ImageContent]:
     """Retrieve chunks from a specific book to explain a concept the user is reading about.
 
     Use this when the user asks about a concept from a specific book, optionally at a specific page.
@@ -132,6 +133,8 @@ async def explain_from_book(
     If the book title is ambiguous (matches multiple books), returns the list of matches
     so the user can clarify which book they mean.
 
+    Returns text results and page images as separate content blocks.
+
     Args:
         book_title: Book name to search for (fuzzy matched, e.g., "DDIA" or "Designing Data")
         query: The concept to explain (e.g., "hinted handoff", "B-tree vs LSM-tree")
@@ -142,13 +145,28 @@ async def explain_from_book(
     embedding_service = _get_embedding_service()
     async with async_session_factory() as session:
         service = SearchService(session, embedding_service)
-        return await service.explain_from_book(
+        result = await service.explain_from_book(
             book_title=book_title,
             query=query,
             page_number=page_number,
             page_range=page_range,
             limit=limit,
         )
+
+    # Build content blocks: text result (without images) + image blocks
+    images = result.images or []
+    result.images = None  # exclude base64 from JSON text to save space
+    content: list[TextContent | ImageContent] = [
+        TextContent(type="text", text=result.model_dump_json()),
+    ]
+    for img in images:
+        content.append(ImageContent(
+            type="image",
+            data=img.image_base64,
+            mimeType=img.media_type,
+        ))
+
+    return content
 
 
 if __name__ == "__main__":

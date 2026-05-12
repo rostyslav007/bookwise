@@ -1,13 +1,41 @@
 """Service for semantic search across book chunks using pgvector."""
 
+import base64
+import logging
+from pathlib import Path
 from urllib.parse import quote_plus
 from uuid import UUID
 
+import fitz
 from pydantic import BaseModel
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
+from app.models.book import Book
+
+logger = logging.getLogger(__name__)
+
+_MAX_PAGE_IMAGES = 2
+_PAGE_IMAGE_DPI = 100
+_MAX_IMAGE_BYTES = 200_000  # ~200KB per image to stay under 1MB total
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent  # -> BooksNavigationMCP/
+
+
+def _resolve_book_path(file_path_str: str) -> Path:
+    """Resolve a book file path, trying multiple base directories."""
+    fp = Path(file_path_str)
+    if fp.is_absolute() and fp.exists():
+        return fp
+    # Try project root (for MCP running from backend/)
+    candidate = _PROJECT_ROOT / fp
+    if candidate.exists():
+        return candidate
+    # Try cwd (for Docker where cwd=/app)
+    candidate = Path.cwd() / fp
+    if candidate.exists():
+        return candidate
+    return fp
 from app.services.embedding_service import EmbeddingService
 
 
@@ -34,8 +62,16 @@ class SearchHit(BaseModel):
     source: str = "library"
 
 
+class PageImage(BaseModel):
+    book_title: str
+    page_number: int
+    image_base64: str
+    media_type: str = "image/png"
+
+
 class SearchResult(BaseModel):
     results: list[SearchHit]
+    images: list[PageImage] = []
     source: str  # "library" or "not_found"
     message: str
 
@@ -53,12 +89,75 @@ class ExplainResult(BaseModel):
     book_author: str | None = None
     matches: list[BookMatch] | None = None
     results: list[SearchHit] | None = None
+    images: list[PageImage] | None = None
 
 
 class SearchService:
     def __init__(self, session: AsyncSession, embedding_service: EmbeddingService) -> None:
         self._session = session
         self._embedding_service = embedding_service
+
+    async def extract_page_images(self, hits: list[SearchHit]) -> list[PageImage]:
+        """Render referenced PDF pages as base64 JPEG images.
+
+        Prioritizes page_context hits over semantic hits for image selection.
+        """
+        # Collect pages, prioritizing page_context source
+        page_context_pages: dict[str, list[int]] = {}  # book_id -> ordered pages
+        semantic_pages: dict[str, list[int]] = {}
+
+        for hit in hits:
+            if hit.format != "pdf" or "/books/" not in hit.viewer_url:
+                continue
+            book_id_str = hit.viewer_url.split("/books/")[1].split("/")[0]
+            target = page_context_pages if hit.source == "page_context" else semantic_pages
+            target.setdefault(book_id_str, [])
+            if hit.page_number not in target[book_id_str]:
+                target[book_id_str].append(hit.page_number)
+
+        # Merge: page_context first, then semantic fills remaining slots
+        all_book_ids = set(page_context_pages) | set(semantic_pages)
+        if not all_book_ids:
+            return []
+
+        images: list[PageImage] = []
+        for book_id_str in all_book_ids:
+            priority_pages = page_context_pages.get(book_id_str, [])
+            fallback_pages = [p for p in semantic_pages.get(book_id_str, []) if p not in priority_pages]
+            selected_pages = (priority_pages + fallback_pages)[:_MAX_PAGE_IMAGES]
+
+            book = await self._session.get(Book, UUID(book_id_str))
+            if not book:
+                continue
+
+            file_path = _resolve_book_path(book.file_path)
+            if not file_path.exists():
+                logger.warning("Book file not found: %s", file_path)
+                continue
+
+            try:
+                doc = fitz.open(file_path)
+                for page_num in selected_pages:
+                    if page_num < 1 or page_num > len(doc):
+                        continue
+                    page = doc[page_num - 1]
+                    pix = page.get_pixmap(dpi=_PAGE_IMAGE_DPI)
+                    img_bytes = pix.tobytes("jpeg")
+                    if len(img_bytes) > _MAX_IMAGE_BYTES:
+                        # Re-render at lower DPI if still too large
+                        pix = page.get_pixmap(dpi=72)
+                        img_bytes = pix.tobytes("jpeg")
+                    images.append(PageImage(
+                        book_title=book.title,
+                        page_number=page_num,
+                        image_base64=base64.b64encode(img_bytes).decode(),
+                        media_type="image/jpeg",
+                    ))
+                doc.close()
+            except Exception:
+                logger.warning("Failed to extract images from %s", file_path)
+
+        return images
 
     async def fuzzy_match_book(self, book_title: str) -> list[BookMatch]:
         """Find books matching a (potentially vague) title using case-insensitive containment."""
@@ -247,10 +346,14 @@ class SearchService:
                         seen_snippets.add(hit.snippet)
                         all_hits.append(hit)
 
+        final_hits = all_hits[:limit]
+        page_images = await self.extract_page_images(final_hits)
+
         return ExplainResult(
             status="ok",
-            message=f"Found {len(all_hits)} chunk(s) from '{book.title}'.",
+            message=f"Found {len(final_hits)} chunk(s) and {len(page_images)} page image(s) from '{book.title}'.",
             book_title=book.title,
             book_author=book.author,
-            results=all_hits[:limit],
+            results=final_hits,
+            images=page_images,
         )

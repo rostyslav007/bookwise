@@ -38,7 +38,11 @@ class EpubParserService:
                 continue
 
             href = item.get_name()
-            title = toc_map.get(href, f"Section {order + 1}")
+            title = toc_map.get(href)
+            if not title:
+                title = self._extract_title_from_html(item.get_content())
+            if not title:
+                title = f"Section {order + 1}"
 
             chapters.append({
                 "title": title,
@@ -61,18 +65,37 @@ class EpubParserService:
 
     @staticmethod
     def _build_toc_map(book: epub.EpubBook) -> dict[str, str]:
-        """Build a mapping from href to title using the EPUB TOC."""
+        """Build a mapping from href to title using the EPUB TOC (recursive)."""
         toc_map: dict[str, str] = {}
-        for item in book.toc:
-            if isinstance(item, epub.Link):
-                href = item.href.split("#")[0]
-                toc_map[href] = item.title
-            elif isinstance(item, tuple) and len(item) >= 2:
-                section = item[0]
-                if isinstance(section, epub.Link):
-                    href = section.href.split("#")[0]
-                    toc_map[href] = section.title
+
+        def _walk(entries: list) -> None:
+            for item in entries:
+                if isinstance(item, epub.Link):
+                    href = item.href.split("#")[0]
+                    if href not in toc_map:
+                        toc_map[href] = item.title
+                elif isinstance(item, tuple) and len(item) >= 2:
+                    section = item[0]
+                    children = item[1]
+                    if isinstance(section, epub.Link):
+                        href = section.href.split("#")[0]
+                        if href not in toc_map:
+                            toc_map[href] = section.title
+                    if isinstance(children, list):
+                        _walk(children)
+
+        _walk(book.toc)
         return toc_map
+
+    @staticmethod
+    def _extract_title_from_html(content: bytes) -> str | None:
+        """Extract the first heading from HTML as a fallback title."""
+        soup = BeautifulSoup(content, "html.parser")
+        for tag in ("h1", "h2", "h3"):
+            heading = soup.find(tag)
+            if heading and heading.get_text(strip=True):
+                return heading.get_text(strip=True)
+        return None
 
     @staticmethod
     def _html_to_text(content: bytes) -> str:

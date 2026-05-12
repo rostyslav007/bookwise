@@ -157,7 +157,9 @@ export function ChapterItem({
           <>
             <span className="flex-1 truncate text-sm">{chapter.title}</span>
             <span className="shrink-0 text-xs text-muted-foreground">
-              pp. {chapter.start_page}-{chapter.end_page}
+              {bookFormat === "epub"
+                ? `§${chapter.start_page}`
+                : `pp. ${chapter.start_page}-${chapter.end_page}`}
             </span>
             <div className="flex shrink-0 gap-0.5">
               <Button
@@ -167,7 +169,7 @@ export function ChapterItem({
                 onClick={() =>
                   navigate(
                     bookFormat === "epub"
-                      ? `/books/${bookId}/epub?chapter=${chapter.order}`
+                      ? `/books/${bookId}/epub?chapterId=${chapter.id}`
                       : `/books/${bookId}/view?page=${chapter.start_page}`,
                   )
                 }

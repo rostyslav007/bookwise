@@ -69,7 +69,7 @@ export function BookDetailPage() {
   return (
     <div className="mx-auto max-w-4xl p-6">
       <Link
-        to="/"
+        to={bookData.group_id ? `/?group=${bookData.group_id}` : "/"}
         className="mb-4 inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
       >
         <ArrowLeft className="size-4" />

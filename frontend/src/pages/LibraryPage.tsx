@@ -1,4 +1,5 @@
-import { useMemo, useState } from "react";
+import { useMemo, useState, useEffect } from "react";
+import { useSearchParams } from "react-router-dom";
 import { GroupSidebar } from "@/components/groups/GroupSidebar";
 import { BookUploadZone } from "@/components/books/BookUploadZone";
 import { BookGrid } from "@/components/books/BookGrid";
@@ -49,8 +50,19 @@ function getGroupIcon(name: string): LucideIcon {
 }
 
 export function LibraryPage() {
-  const [selectedGroupId, setSelectedGroupId] = useState<string | null>(null);
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [selectedGroupId, setSelectedGroupId] = useState<string | null>(
+    searchParams.get("group"),
+  );
   const groups = useGroups();
+
+  useEffect(() => {
+    if (selectedGroupId) {
+      setSearchParams({ group: selectedGroupId }, { replace: true });
+    } else {
+      setSearchParams({}, { replace: true });
+    }
+  }, [selectedGroupId, setSearchParams]);
 
   const selectedGroupName = useMemo(() => {
     if (!selectedGroupId || !groups.data) return null;

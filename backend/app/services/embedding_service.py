@@ -1,3 +1,6 @@
+import asyncio
+from functools import partial
+
 from sentence_transformers import SentenceTransformer
 
 from app.config import settings
@@ -16,7 +19,12 @@ class EmbeddingService:
         return self._model
 
     def encode(self, texts: list[str]) -> list[list[float]]:
-        """Generate embeddings for a list of text chunks."""
+        """Generate embeddings synchronously (for MCP server / non-async contexts)."""
         model = self._get_model()
         embeddings = model.encode(texts, show_progress_bar=False)
         return embeddings.tolist()
+
+    async def encode_async(self, texts: list[str]) -> list[list[float]]:
+        """Generate embeddings in a thread pool to avoid blocking the event loop."""
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(None, partial(self.encode, texts))

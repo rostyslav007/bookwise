@@ -9,7 +9,7 @@ from fastapi.responses import FileResponse, Response
 from starlette.responses import StreamingResponse
 
 from app.config import settings
-from app.database import async_session_factory, get_session
+from app.database import async_session_factory, background_session_factory, get_session
 from app.models.book import Book, BookStatus
 from app.models.chapter import Chapter
 from app.models.chunk import ChunkEmbedding
@@ -36,7 +36,7 @@ def _get_embedding_service() -> EmbeddingService:
 
 
 async def _run_processing(book_id: UUID) -> None:
-    async with async_session_factory() as session:
+    async with background_session_factory() as session:
         claude_service = ClaudeService(api_key=settings.anthropic_api_key)
         embedding_service = _get_embedding_service()
         processing_service = ProcessingService(
@@ -211,7 +211,7 @@ async def _run_reindex(book_id: UUID, strategy: str = "headings") -> None:
     from app.services.processing_service import ChunkingStrategy
     chunking = ChunkingStrategy(strategy) if isinstance(strategy, str) else strategy
     try:
-        async with async_session_factory() as session:
+        async with background_session_factory() as session:
             await session.execute(
                 delete(ChunkEmbedding).where(ChunkEmbedding.book_id == book_id)
             )
@@ -241,7 +241,7 @@ async def _run_reindex(book_id: UUID, strategy: str = "headings") -> None:
             processing_service._emit_complete(book_id, "Done")
     except Exception:
         logger.exception("Failed to reindex book %s", book_id)
-        async with async_session_factory() as session:
+        async with background_session_factory() as session:
             book = await session.get(Book, book_id)
             if book:
                 book.status = BookStatus.READY.value

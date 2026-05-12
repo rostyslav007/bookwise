@@ -204,10 +204,9 @@ class SearchService:
     def _row_to_hit(self, row, source: str = "semantic", relevance_score: float = 0.0) -> SearchHit:
         """Convert a DB row to a SearchHit."""
         if row.format == "epub":
-            chapter_index = row.page_number - 1
             viewer_url = (
                 f"{settings.frontend_url}/books/{row.book_id}/epub"
-                f"?chapter={chapter_index}"
+                f"?chapterId={row.chapter_id}"
             )
         else:
             viewer_url = (
@@ -236,7 +235,7 @@ class SearchService:
         book_id: UUID | None = None,
     ) -> SearchResult:
         """Search book chunks by semantic similarity using pgvector cosine distance."""
-        query_embedding = self._embedding_service.encode([query])[0]
+        query_embedding = (await self._embedding_service.encode_async([query]))[0]
 
         where_clauses = ""
         params: dict[str, str | int] = {"embedding": str(query_embedding), "limit": limit}

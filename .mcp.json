@@ -4,7 +4,7 @@
       "type": "http",
       "url": "https://recruitment.awos.provectus.pro/mcp"
     },
-    "books-navigation": {
+    "bookwise": {
       "type": "stdio",
       "command": "uv",
       "args": ["run", "--directory", "backend", "python", "-m", "app.mcp_server"],

@@ -157,7 +157,7 @@ class ProcessingService:
             if not chapter_record:
                 continue
 
-            embeddings = self._embedding_service.encode(chunks)
+            embeddings = await self._embedding_service.encode_async(chunks)
 
             for chunk_text, embedding in zip(chunks, embeddings):
                 self._session.add(
@@ -200,24 +200,62 @@ class ProcessingService:
     def _toc_to_structure(
         toc: list[list], total_pages: int
     ) -> list[dict[str, object]]:
-        """Convert PyMuPDF TOC to a flat chapter structure as fallback."""
+        """Convert PyMuPDF TOC to a hierarchical chapter structure.
+
+        PyMuPDF TOC entries are [level, title, page] where level indicates nesting depth.
+        Builds a tree by tracking a stack of parent nodes at each level.
+        """
         if not toc:
             return [{"title": "Full Book", "start_page": 1, "end_page": total_pages, "children": []}]
 
-        structure: list[dict[str, object]] = []
+        # First pass: build flat list with levels and compute end pages
+        flat: list[dict[str, object]] = []
         for i, entry in enumerate(toc):
+            level = int(entry[0]) if len(entry) > 0 else 1
             title = str(entry[1]).replace("\x00", "").strip() if len(entry) > 1 else f"Chapter {i + 1}"
-            start_page = entry[2] if len(entry) > 2 else 1
-            # End page is the start of the next entry minus 1, or total_pages for the last
-            next_start = (toc[i + 1][2] - 1) if i + 1 < len(toc) and len(toc[i + 1]) > 2 else total_pages
+            start_page = int(entry[2]) if len(entry) > 2 else 1
+            # End page: next entry's start - 1, or total_pages for the last
+            next_start = int(toc[i + 1][2]) - 1 if i + 1 < len(toc) and len(toc[i + 1]) > 2 else total_pages
             end_page = max(next_start, start_page)
-            structure.append({
-                "title": str(title),
-                "start_page": int(start_page),
-                "end_page": int(end_page),
+            flat.append({
+                "level": level,
+                "title": title,
+                "start_page": start_page,
+                "end_page": end_page,
                 "children": [],
             })
-        return structure
+
+        # Second pass: build tree using a stack
+        root: list[dict[str, object]] = []
+        stack: list[dict[str, object]] = []  # stack of (node, level) ancestors
+
+        for item in flat:
+            level = item.pop("level")
+            # Pop stack until we find a parent at a lower level
+            while stack and stack[-1][1] >= level:
+                stack.pop()
+
+            if stack:
+                parent = stack[-1][0]
+                parent["children"].append(item)  # type: ignore[union-attr]
+            else:
+                root.append(item)
+
+            stack.append((item, level))
+
+        # Fix end pages for parent nodes to span their children
+        def _fix_end_pages(nodes: list[dict[str, object]]) -> None:
+            for node in nodes:
+                children = node.get("children", [])
+                if children:
+                    _fix_end_pages(children)  # type: ignore[arg-type]
+                    node["end_page"] = max(
+                        int(node["end_page"]),  # type: ignore[arg-type]
+                        max(int(c["end_page"]) for c in children),  # type: ignore[index]
+                    )
+
+        _fix_end_pages(root)
+        return root
 
     def _emit(self, book_id: UUID, step: str) -> None:
         if self._tracker:
@@ -296,7 +334,7 @@ class ProcessingService:
             if not chunks:
                 continue
 
-            embeddings = self._embedding_service.encode(chunks)
+            embeddings = await self._embedding_service.encode_async(chunks)
 
             for chunk_text, embedding in zip(chunks, embeddings):
                 self._session.add(

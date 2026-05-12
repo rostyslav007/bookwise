@@ -6,15 +6,29 @@ import type Rendition from 'epubjs/types/rendition';
 import type Navigation from 'epubjs/types/navigation';
 import { ArrowLeft, ChevronLeft, ChevronRight, Minus, Plus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { useChapters } from '@/api/chapters';
 
 const MIN_FONT_SIZE = 60;
 const MAX_FONT_SIZE = 200;
 const FONT_SIZE_STEP = 10;
 
+interface FlatChapter { id: string; title: string; order: number; start_page: number }
+
+function flattenChapters(chapters: { id: string; title: string; order: number; start_page: number; children: any[] }[]): FlatChapter[] {
+  const result: FlatChapter[] = [];
+  for (const ch of chapters) {
+    result.push({ id: ch.id, title: ch.title, order: ch.order, start_page: ch.start_page });
+    if (ch.children?.length) result.push(...flattenChapters(ch.children));
+  }
+  return result;
+}
+
 export default function EpubViewerPage() {
   const { bookId } = useParams<{ bookId: string }>();
   const [searchParams] = useSearchParams();
-  const targetChapter = searchParams.get('chapter');
+  const targetChapterId = searchParams.get('chapterId');
+  const legacyChapterIndex = searchParams.get('chapter');
+  const { data: chapters } = useChapters(bookId!);
 
   const viewerRef = useRef<HTMLDivElement>(null);
   const renditionRef = useRef<Rendition | null>(null);
@@ -48,20 +62,46 @@ export default function EpubViewerPage() {
       book.loaded.navigation.then((nav: Navigation) => {
         if (!destroyed) setToc(nav.toc);
 
-        // Navigate to target chapter if specified
-        if (targetChapter && nav.toc.length > 0) {
-          const index = Number(targetChapter);
-          // If it's a number, treat as chapter order index
+        // Flatten TOC for searching (includes nested items)
+        const allTocItems: NavItem[] = [];
+        function walkToc(items: NavItem[]) {
+          for (const item of items) {
+            allTocItems.push(item);
+            if (item.subitems?.length) walkToc(item.subitems);
+          }
+        }
+        walkToc(nav.toc);
+
+        // Navigate to target chapter
+        if (targetChapterId && chapters) {
+          // Find chapter title from DB, then match in TOC by title
+          const flat = flattenChapters(chapters);
+          const dbChapter = flat.find((ch) => ch.id === targetChapterId);
+          if (dbChapter) {
+            const tocMatch = allTocItems.find((t) =>
+              t.label.trim().toLowerCase() === dbChapter.title.trim().toLowerCase()
+            );
+            if (tocMatch) {
+              rendition.display(tocMatch.href);
+            } else {
+              // Fallback: navigate by spine index (start_page is 1-indexed spine position)
+              const spineItem = book.spine.get(dbChapter.start_page - 1);
+              if (spineItem) {
+                rendition.display(spineItem.href);
+              } else {
+                rendition.display();
+              }
+            }
+          } else {
+            rendition.display();
+          }
+        } else if (legacyChapterIndex && nav.toc.length > 0) {
+          // Backwards compatible: support ?chapter=N
+          const index = Number(legacyChapterIndex);
           if (!Number.isNaN(index) && index < nav.toc.length) {
             rendition.display(nav.toc[index].href);
           } else {
-            // Otherwise treat as an href or title search
-            const match = nav.toc.find((t) => t.href === targetChapter || t.label === targetChapter);
-            if (match) {
-              rendition.display(match.href);
-            } else {
-              rendition.display();
-            }
+            rendition.display();
           }
         } else {
           rendition.display();
@@ -80,7 +120,7 @@ export default function EpubViewerPage() {
       destroyed = true;
       cleanupPromise.then((cleanup) => cleanup?.());
     };
-  }, [bookId, targetChapter]);
+  }, [bookId, targetChapterId, legacyChapterIndex, chapters]);
 
   useEffect(() => {
     renditionRef.current?.themes.fontSize(`${fontSize}%`);

@@ -430,8 +430,6 @@ class ProcessingService:
 
             await self._session.flush()
 
-        doc.close()
-
     @staticmethod
     def _extract_chapter_text(doc: fitz.Document, chapter: Chapter) -> str:
         """Extract raw text from a chapter's page range."""
